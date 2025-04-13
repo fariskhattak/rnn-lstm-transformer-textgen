@@ -33,8 +33,14 @@ def merge_text_files(data_dir, output_file):
     """
     # open new file
     with open(output_file, "w", encoding="utf-8") as outfile:
-        # WRITE CODE FOR THIS
-        print("opening file")
+        for filename in os.listdir(data_dir):
+            file_path = os.path.join(data_dir, filename)
+            if os.path.isfile(file_path) and filename.endswith(".txt"):
+                with open(file_path, "r", encoding="utf-8") as infile:
+                    content = infile.read().strip()
+                    if content:
+                        outfile.write(content + "\n")
+                        print(f"Merged: {filename}")
 
     
 if __name__ == "__main__":
