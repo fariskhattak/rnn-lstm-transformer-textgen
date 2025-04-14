@@ -1,5 +1,6 @@
 import torch
 from rnn import VanillaRNNLanguageModel
+from lstm import LSTMLanguageModel
 from dataset import TextDataset
 from torch.utils.data import DataLoader
 from main import load_tokenizer, evaluate_perplexity, compute_bleu_from_jsonl, collate_fn, TOKENIZER_PATH, EMBED_DIM, HIDDEN_DIM, NUM_LAYERS, BATCH_SIZE, MAX_SEQ_LEN, TEST_FILE
@@ -13,7 +14,13 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Initialize a model of the same class/architecture as what was trained
-    model = VanillaRNNLanguageModel(
+    # model = VanillaRNNLanguageModel(
+    #     vocab_size=vocab_size,
+    #     embed_dim=EMBED_DIM,
+    #     hidden_dim=HIDDEN_DIM,
+    #     num_layers=NUM_LAYERS
+    # ).to(device)
+    model = LSTMLanguageModel(
         vocab_size=vocab_size,
         embed_dim=EMBED_DIM,
         hidden_dim=HIDDEN_DIM,
@@ -21,7 +28,8 @@ if __name__ == "__main__":
     ).to(device)
 
     # Load the saved weights
-    model.load_state_dict(torch.load("rnn_final_model.pt", map_location=device))
+    # model.load_state_dict(torch.load("rnn_final_model.pt", map_location=device))
+    model.load_state_dict(torch.load("lstm_final_model.pt", map_location=device))
     model.eval()
 
     ##############################

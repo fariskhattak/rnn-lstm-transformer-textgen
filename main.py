@@ -2,37 +2,91 @@ import json
 import random
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 import torch.optim as optim
-import sentencepiece as spm
-from tqdm import tqdm
-from dataset import TextDataset
-from rnn import VanillaRNNLanguageModel
-import matplotlib.pyplot as plt
+import argparse
 import math
 import nltk
 from nltk.translate.bleu_score import corpus_bleu
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+
+import sentencepiece as spm
+from dataset import TextDataset
+from rnn import VanillaRNNLanguageModel
+from lstm import LSTMLanguageModel
 
 
-# Original file you want to split
+# ----------  CONSTANTS / PATHS  ------------------
 ORIGINAL_TRAIN_FILE = "data/train.jsonl"
+TRAIN_SPLIT_FILE    = "data/train_split.jsonl"
+VAL_SPLIT_FILE      = "data/val_split.jsonl"
+TEST_FILE           = "data/test.jsonl"
+TOKENIZER_PATH      = "bpe_tokenizer.model"
 
-# New split files
-TRAIN_SPLIT_FILE = "data/train_split.jsonl"
-VAL_SPLIT_FILE = "data/val_split.jsonl"
+MAX_SEQ_LEN  = 256
+BATCH_SIZE   = 128
+EMBED_DIM    = 128
+HIDDEN_DIM   = 256
+NUM_LAYERS   = 2
+EPOCHS       = 30
+LEARNING_RATE= 1e-3
 
-TEST_FILE = "data/test.jsonl"
+# ----------  SPLIT / TOKENIZER UTILS  -----------
+def split_train_file(original_file=ORIGINAL_TRAIN_FILE, train_file=TRAIN_SPLIT_FILE, val_file=VAL_SPLIT_FILE, train_ratio=0.8):
+    """
+    Splits the original train.jsonl into two files: train_split.jsonl and val_split.jsonl
+    according to a given train_ratio (e.g., 0.8 for 80%).
+    """
+    with open(original_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-TOKENIZER_PATH = "bpe_tokenizer.model"
+    random.shuffle(lines)  # Randomize order before splitting
 
-MAX_SEQ_LEN = 256
-BATCH_SIZE = 128
-EMBED_DIM = 128
-HIDDEN_DIM = 256
-NUM_LAYERS = 2
-EPOCHS = 30
-LEARNING_RATE = 1e-3
+    split_idx = int(train_ratio * len(lines))
+    train_lines = lines[:split_idx]
+    val_lines = lines[split_idx:]
 
+    # Write train portion
+    with open(train_file, "w", encoding="utf-8") as f:
+        for line in train_lines:
+            f.write(line)
+
+    # Write validation portion
+    with open(val_file, "w", encoding="utf-8") as f:
+        for line in val_lines:
+            f.write(line)
+
+def load_tokenizer(model_file):
+    """
+    Load a trained SentencePiece tokenizer from a .model file.
+
+    :param model_file: The path to the SentencePiece model file (e.g. bpe_tokenizer.model).
+    :return: A SentencePieceProcessor instance for encoding/decoding text.
+    """
+    sp = spm.SentencePieceProcessor()
+    sp.load(model_file)
+    return sp
+
+# ----------  COLLATE / DATA UTILS  -------------
+def collate_fn(batch):
+    """
+    Ensure batch is appropriately sized and padded for efficient training
+
+    :param batch: batch from DataLoader, which will be a list of Tuples of token ID tensors (which
+        could be different sizes)
+    :return: collated input and target batch
+    """
+    input_batch, target_batch = zip(*batch)
+    input_batch = nn.utils.rnn.pad_sequence(
+        input_batch, batch_first=True, padding_value=3
+    )
+    target_batch = nn.utils.rnn.pad_sequence(
+        target_batch, batch_first=True, padding_value=3
+    )
+    return input_batch, target_batch
+
+# ----------  METRIC: BLEU  ----------------------
 def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50):
     """
     Computes BLEU by reading raw prompt/completion pairs from test.jsonl (or similar),
@@ -79,6 +133,7 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
     bleu_score = corpus_bleu(references, candidates)
     return bleu_score
 
+# ----------  METRIC: PERPLEXITY  ----------------
 def evaluate_perplexity(model, test_loader, vocab_size, device, pad_token_id=3):
     """
     Compute the perplexity of the model on the test set.
@@ -111,87 +166,12 @@ def evaluate_perplexity(model, test_loader, vocab_size, device, pad_token_id=3):
     ppl = math.exp(average_loss)
     return ppl
 
-def split_train_file(original_file=ORIGINAL_TRAIN_FILE, train_file=TRAIN_SPLIT_FILE, val_file=VAL_SPLIT_FILE, train_ratio=0.8):
+# ----------  TRAINING  --------------------------
+def train_model(model, train_loader, val_loader, vocab_size, device,
+                epochs=EPOCHS, lr=LEARNING_RATE, early_stopping_patience=3):
     """
-    Splits the original train.jsonl into two files: train_split.jsonl and val_split.jsonl
-    according to a given train_ratio (e.g., 0.8 for 80%).
+    A generic train function that can handle either RNN, LSTM, or Transformer.
     """
-    with open(original_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    random.shuffle(lines)  # Randomize order before splitting
-
-    split_idx = int(train_ratio * len(lines))
-    train_lines = lines[:split_idx]
-    val_lines = lines[split_idx:]
-
-    # Write train portion
-    with open(train_file, "w", encoding="utf-8") as f:
-        for line in train_lines:
-            f.write(line)
-
-    # Write validation portion
-    with open(val_file, "w", encoding="utf-8") as f:
-        for line in val_lines:
-            f.write(line)
-
-def load_tokenizer(model_file):
-    """
-    Load a trained SentencePiece tokenizer from a .model file.
-
-    :param model_file: The path to the SentencePiece model file (e.g. bpe_tokenizer.model).
-    :return: A SentencePieceProcessor instance for encoding/decoding text.
-    """
-    sp = spm.SentencePieceProcessor()
-    sp.load(model_file)
-    return sp
-
-def collate_fn(batch):
-    """
-    Ensure batch is appropriately sized and padded for efficient training
-
-    :param batch: batch from DataLoader, which will be a list of Tuples of token ID tensors (which
-        could be different sizes)
-    :return: collated input and target batch
-    """
-    input_batch, target_batch = zip(*batch)
-    input_batch = nn.utils.rnn.pad_sequence(
-        input_batch, batch_first=True, padding_value=3
-    )
-    target_batch = nn.utils.rnn.pad_sequence(
-        target_batch, batch_first=True, padding_value=3
-    )
-    return input_batch, target_batch
-
-def train_model():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 1) Split the original train.jsonl into 80% train, 20% val
-    split_train_file()
-
-    # 2) Load the tokenizer
-    tokenizer = load_tokenizer(TOKENIZER_PATH)
-    vocab_size = tokenizer.get_piece_size()
-
-    # 3) Create train and val Datasets from the new split files
-    train_dataset = TextDataset(TRAIN_SPLIT_FILE, tokenizer, MAX_SEQ_LEN)
-    val_dataset = TextDataset(VAL_SPLIT_FILE, tokenizer, MAX_SEQ_LEN)
-
-    train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn
-    )
-
-    # 4) Instantiate model, optimizer, and scheduler
-    model = VanillaRNNLanguageModel(
-        vocab_size=vocab_size,
-        embed_dim=EMBED_DIM,
-        hidden_dim=HIDDEN_DIM,
-        num_layers=NUM_LAYERS,
-    ).to(device)
-
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, "min", patience=1, factor=0.5, verbose=True
@@ -200,7 +180,6 @@ def train_model():
 
     best_val_loss = float("inf")
     no_improve_epochs = 0
-    early_stopping_patience = 3
 
     train_losses, val_losses = [], []
 
@@ -244,7 +223,6 @@ def train_model():
         avg_val_loss = total_val_loss / len(val_loader)
         val_losses.append(avg_val_loss)
 
-        # Scheduler step
         scheduler.step(avg_val_loss)
 
         print(
@@ -268,37 +246,81 @@ def train_model():
 
     return model, train_losses, val_losses
 
+# ----------  MAIN SCRIPT  -----------------------
+def main(model_type="rnn"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-if __name__ == "__main__":
-    # Train the model and capture losses
-    model, train_losses, val_losses = train_model()
+    # 1) Split data
+    split_train_file()
 
-    # Plot the train/val loss curves
-    epochs_range = range(1, len(train_losses) + 1)
-    plt.figure()
-    plt.plot(epochs_range, train_losses, label="Train Loss")
-    plt.plot(epochs_range, val_losses, label="Val Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Training and Validation Loss")
-    plt.legend()
-    plt.show()
+    # 2) Load tokenizer, create dataset
+    tokenizer = load_tokenizer(TOKENIZER_PATH)
+    vocab_size= tokenizer.get_piece_size()
+
+    train_dataset = TextDataset(TRAIN_SPLIT_FILE, tokenizer, MAX_SEQ_LEN)
+    val_dataset   = TextDataset(VAL_SPLIT_FILE,   tokenizer, MAX_SEQ_LEN)
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn
+    )
+
+    # 3) Instantiate the chosen model
+    if model_type.lower() == "rnn":
+        print(">>> Using VanillaRNNLanguageModel...")
+        model = VanillaRNNLanguageModel(
+            vocab_size=vocab_size,
+            embed_dim=EMBED_DIM,
+            hidden_dim=HIDDEN_DIM,
+            num_layers=NUM_LAYERS,
+        ).to(device)
+    elif model_type.lower() == "lstm":
+        print(">>> Using LSTMLanguageModel...")
+        model = LSTMLanguageModel(
+            vocab_size=vocab_size,
+            embed_dim=EMBED_DIM,
+            hidden_dim=HIDDEN_DIM,
+            num_layers=NUM_LAYERS,
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}. Must be 'rnn' or 'lstm'.")
+
+    # 4) Train the model
+    model, train_losses, val_losses = train_model(
+        model,
+        train_loader,
+        val_loader,
+        vocab_size,
+        device,
+        epochs=EPOCHS,
+        lr=LEARNING_RATE,
+        early_stopping_patience=3
+    )
+
+    # # Plot the train/val loss curves
+    # epochs_range = range(1, len(train_losses) + 1)
+    # plt.figure()
+    # plt.plot(epochs_range, train_losses, label="Train Loss")
+    # plt.plot(epochs_range, val_losses, label="Val Loss")
+    # plt.xlabel("Epoch")
+    # plt.ylabel("Loss")
+    # plt.title("Training and Validation Loss")
+    # plt.legend()
+    # plt.show()
 
     # Save the trained model
-    torch.save(model.state_dict(), "rnn_final_model.pt")
+    torch.save(model.state_dict(), f"{model_type}_final_model.pt")
 
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size = tokenizer.get_piece_size()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 3) Evaluate on test set
-    test_dataset = TextDataset("data/test.jsonl", tokenizer, MAX_SEQ_LEN)
-    test_loader = DataLoader(
-        test_dataset, 
-        batch_size=BATCH_SIZE, 
-        shuffle=False, 
-        collate_fn=collate_fn
-    )
+    # 5) Evaluate on test set
+    test_dataset = TextDataset(TEST_FILE, tokenizer, MAX_SEQ_LEN)
+    test_loader  = DataLoader(test_dataset, batch_size=BATCH_SIZE,
+                              shuffle=False, collate_fn=collate_fn)
     
     # --- Perplexity ---
     ppl = evaluate_perplexity(model, test_loader, vocab_size, device)
@@ -307,3 +329,12 @@ if __name__ == "__main__":
     # --- BLEU ---
     bleu = compute_bleu_from_jsonl(model, TEST_FILE, tokenizer, device)
     print(f"Test BLEU: {bleu:.4f}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_type", type=str, default="rnn",
+                        choices=["rnn","lstm"],
+                        help="Which model to train: 'rnn' or 'lstm' or 'transformer")
+    args = parser.parse_args()
+
+    main(model_type=args.model_type)
