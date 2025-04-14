@@ -6,7 +6,7 @@ import torch.optim as optim
 import argparse
 import math
 import nltk
-from nltk.translate.bleu_score import corpus_bleu
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -15,6 +15,7 @@ import sentencepiece as spm
 from dataset import TextDataset
 from rnn import VanillaRNNLanguageModel
 from lstm import LSTMLanguageModel
+from transformer import TransformerLanguageModel
 
 
 # ----------  CONSTANTS / PATHS  ------------------
@@ -99,12 +100,13 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
     :param max_gen_len: Max tokens to generate for each prompt
     :return: BLEU score (float)
     """
-    references = []
-    candidates = []
+    references = []   # Will store list of list(s) of reference tokens
+    candidates = []   # Will store list of candidate tokens
 
     model.eval()
+    smoothing_fn = SmoothingFunction().method1  # We’ll use a simple smoothing method
 
-    # Read each line from the JSONL. Each line is {"prompt": "...", "completion": "..."}
+    # 1) Read each example from the JSONL
     with open(jsonl_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
@@ -113,24 +115,31 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
         prompt_text = data["prompt"]
         reference_text = data["completion"]
 
-        # 1) Generate text from the model
+        # 2) Generate text from the model (now passing max_gen_len)
         generated_text = model.generate(
             prompt=prompt_text,
             tokenizer=tokenizer,
+            max_length=max_gen_len,
+            device=device
         )
 
-        # print(f"{prompt_text}: {generated_text}")
+        # 3) Tokenize both reference and candidate in word space
+        reference_tokens = nltk.word_tokenize(reference_text)
+        candidate_tokens = nltk.word_tokenize(generated_text)
 
-        # 2) Tokenize for BLEU comparison (simple word-level tokenization)
-        reference_tokens  = nltk.word_tokenize(reference_text)
-        candidate_tokens  = nltk.word_tokenize(generated_text)
-
-        # 3) Add to lists
-        references.append([reference_tokens])  # BLEU expects list of *lists* of tokens
+        # 4) Append them to the big lists
+        #    The 'references' list must have an extra nesting: one list for each example,
+        #    containing all references for that example (here we only have one).
+        references.append([reference_tokens])
         candidates.append(candidate_tokens)
 
-    # 4) Compute corpus-level BLEU
-    bleu_score = corpus_bleu(references, candidates)
+    # 5) Compute corpus-level BLEU with smoothing
+    bleu_score = corpus_bleu(
+        references,
+        candidates,
+        smoothing_function=smoothing_fn
+    )
+
     return bleu_score
 
 # ----------  METRIC: PERPLEXITY  ----------------
@@ -284,6 +293,18 @@ def main(model_type="rnn"):
             hidden_dim=HIDDEN_DIM,
             num_layers=NUM_LAYERS,
         ).to(device)
+    elif model_type.lower() == "transformer":
+        print(">>> Using TransformerLanguageModel...")
+        model = TransformerLanguageModel(
+        vocab_size=vocab_size,
+        embed_dim=EMBED_DIM,    
+        nhead=4,               
+        num_layers=NUM_LAYERS, 
+        feedforward_dim=512,   
+        dropout=0.2,           
+        pad_token_id=3,        
+        max_seq_len=512        
+    ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}. Must be 'rnn' or 'lstm'.")
 
@@ -311,7 +332,7 @@ def main(model_type="rnn"):
     # plt.show()
 
     # Save the trained model
-    torch.save(model.state_dict(), f"{model_type}_final_model.pt")
+    torch.save(model.state_dict(), f"models/{model_type}_final_model.pt")
 
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size = tokenizer.get_piece_size()
@@ -333,7 +354,7 @@ def main(model_type="rnn"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_type", type=str, default="rnn",
-                        choices=["rnn","lstm"],
+                        choices=["rnn","lstm", "transformer"],
                         help="Which model to train: 'rnn' or 'lstm' or 'transformer")
     args = parser.parse_args()
 
