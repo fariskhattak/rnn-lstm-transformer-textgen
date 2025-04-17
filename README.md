@@ -1,10 +1,10 @@
-# 🧠 Language Modeling with RNN, LSTM, and Transformer
+# Language Modeling with RNN, LSTM, and Transformer
 
 This project implements and compares three types of neural language models — Vanilla RNN, LSTM, and Transformer — for next-token prediction using a corpus of literary text. The models are trained and evaluated on tokenized inputs with a SentencePiece BPE tokenizer.
 
 ---
 
-## 🚀 Features
+## Features
 - Token-level language modeling with RNN, LSTM, and Transformer
 - SentencePiece tokenizer with BPE encoding
 - Evaluation using **Perplexity** and **BLEU score**
@@ -13,7 +13,7 @@ This project implements and compares three types of neural language models — V
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 .
@@ -33,7 +33,7 @@ This project implements and compares three types of neural language models — V
 
 ---
 
-## 📦 Requirements
+## Requirements
 
 Install the necessary libraries:
 > You’ll need PyTorch, tqdm, sentencepiece, matplotlib, and nltk.
@@ -46,7 +46,7 @@ nltk.download('punkt')
 
 ---
 
-## 🔧 Training a Model
+## Training a Model
 
 ```bash
 python main.py --model_type rnn         # or lstm or transformer
@@ -57,7 +57,7 @@ Trained model checkpoints and loss logs will be saved to `models/`.
 
 ---
 
-## 🧪 Evaluation
+## Evaluation
 
 ```bash
 python test.py
@@ -69,11 +69,11 @@ This will:
 
 ---
 
-## 💬 Chat with a Model
+## Chat with a Model
 
 You can interact with any **trained model** via CLI by specifying the model type and path to the `.pt` file. You can also optionally customize the architecture using `--embed_dim`, `--hidden_dim`, and `--num_layers`.
 
-### 🔁 RNN Example
+### RNN Example
 ```bash
 python chat.py \
   --model_type rnn \
@@ -83,7 +83,7 @@ python chat.py \
   --num_layers 2
 ```
 
-### 🔁 LSTM Example
+### LSTM Example
 ```bash
 python chat.py \
   --model_type lstm \
@@ -93,7 +93,7 @@ python chat.py \
   --num_layers 3
 ```
 
-### 🧠 Transformer Example
+### Transformer Example
 ```bash
 python chat.py \
   --model_type transformer \
@@ -110,7 +110,7 @@ Bot: The moon rose slowly over the silent sea, casting silver light on the waves
 
 ---
 
-## 📊 Visualizations
+## Visualizations
 
 To plot training and validation loss curves:
 ```bash
@@ -126,17 +126,17 @@ Note: Loss data is based on these models:
 
 ---
 
-## 📈 Results Summary
+## Results Summary
 
 | Model       | Perplexity | BLEU Score | Best Validation Loss |
 |-------------|------------|------------|----------------------|
-| RNN         | 134.448    | 0.0001     | 4.9077
-| LSTM        | 107.623    | 0.0001     | 4.6908
+| RNN         | 102.011    | 0.0003     | 4.6333
+| LSTM        | 101.874    | 0.0001     | 4.6280
 | Transformer | 82.228     | 0.0003     | 4.4270
 
 ---
 
 ---
 
-## 🤖 Author
+## Author
 Created by Faris Khattak for CSC 4700 Foundational AI Project 2.
