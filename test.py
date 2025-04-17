@@ -11,7 +11,8 @@ from dataset import TextDataset
 from main import (
     load_tokenizer, 
     evaluate_perplexity, 
-    compute_bleu_from_jsonl, 
+    compute_bleu_from_jsonl,
+    compute_token_bleu, 
     collate_fn, 
     TOKENIZER_PATH, 
     EMBED_DIM, 
@@ -61,7 +62,7 @@ def test_model(model_class, model_path, model_name, tokenizer, test_loader, voca
     print(f"[{model_name}] Test Perplexity: {ppl:.3f}")
 
     # 3) Evaluate BLEU
-    bleu = compute_bleu_from_jsonl(model, TEST_FILE, tokenizer, device)
+    bleu = compute_token_bleu(model, TEST_FILE, tokenizer, device)
     print(f"[{model_name}] Test BLEU: {bleu:.4f}")
     
 
@@ -80,11 +81,17 @@ if __name__ == "__main__":
         collate_fn=collate_fn
     )
 
-    # Paths to each model’s saved weights
+    # # Paths to each model’s saved weights
+    # model_paths = {
+    #     "rnn": "models/rnn_final_model.pt",
+    #     "lstm": "models/lstm_final_model.pt",
+    #     "transformer": "models/transformer_final_model.pt"
+    # }
+
     model_paths = {
-        "rnn": "models/rnn_final_model.pt",
-        "lstm": "models/lstm_final_model.pt",
-        "transformer": "models/transformer_final_model.pt"
+        "rnn": "models/rnn_e256_h512_l4.pt",
+        "lstm": "models/lstm_e256_h512_l4.pt",
+        "transformer": "models/transformer_e256_h512_l4.pt"
     }
 
     # Evaluate all three:

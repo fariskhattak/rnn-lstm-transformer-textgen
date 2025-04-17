@@ -27,9 +27,9 @@ TOKENIZER_PATH      = "bpe_tokenizer.model"
 
 MAX_SEQ_LEN  = 256
 BATCH_SIZE   = 128
-EMBED_DIM    = 128
-HIDDEN_DIM   = 256
-NUM_LAYERS   = 2
+EMBED_DIM    = 256
+HIDDEN_DIM   = 512
+NUM_LAYERS   = 4
 EPOCHS       = 30
 LEARNING_RATE= 1e-3
 
@@ -87,10 +87,39 @@ def collate_fn(batch):
     )
     return input_batch, target_batch
 
+def compute_token_bleu(model, jsonl_file, tokenizer, device):
+    references = []
+    candidates = []
+    smoothing_fn = SmoothingFunction().method1
+
+    with open(jsonl_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    for i, line in enumerate(tqdm(lines)):
+        data = json.loads(line.strip())
+        prompt_text = data["prompt"]
+        reference_text = data["completion"]
+
+        # Generate only 1 token
+        input_ids = tokenizer.encode(prompt_text, out_type=int)
+        input_tensor = torch.tensor([input_ids], dtype=torch.long, device=device)
+
+        token_id, _ = model.predict_next_token(input_tensor)
+        generated_token = tokenizer.decode([token_id]).strip()
+        reference_token = reference_text.strip()
+
+        # Optionally tokenize with nltk
+        candidates.append(nltk.word_tokenize(generated_token))
+        references.append([nltk.word_tokenize(reference_token)])
+
+    bleu = corpus_bleu(references, candidates, smoothing_function=smoothing_fn)
+    print(f"\n[Token-Level] BLEU Score: {bleu:.4f}")
+    return bleu
+
 # ----------  METRIC: BLEU  ----------------------
 def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50):
     """
-    Computes BLEU by reading raw prompt/completion pairs from test.jsonl (or similar),
+    Computes BLEU by reading raw prompt/completion pairs from test.jsonl,
     generating text from the model for each prompt, and comparing to reference completions.
 
     :param model: Your trained language model
@@ -104,9 +133,9 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
     candidates = []   # Will store list of candidate tokens
 
     model.eval()
-    smoothing_fn = SmoothingFunction().method1  # We’ll use a simple smoothing method
+    smoothing_fn = SmoothingFunction().method1  # use a simple smoothing method
 
-    # 1) Read each example from the JSONL
+    # Read each example from the JSONL
     with open(jsonl_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
@@ -115,7 +144,7 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
         prompt_text = data["prompt"]
         reference_text = data["completion"]
 
-        # 2) Generate text from the model (now passing max_gen_len)
+        # Generate text from the model
         generated_text = model.generate(
             prompt=prompt_text,
             tokenizer=tokenizer,
@@ -123,13 +152,11 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
             device=device
         )
 
-        # 3) Tokenize both reference and candidate in word space
+        # Tokenize both reference and candidate in word space
         reference_tokens = nltk.word_tokenize(reference_text)
         candidate_tokens = nltk.word_tokenize(generated_text)
 
-        # 4) Append them to the big lists
-        #    The 'references' list must have an extra nesting: one list for each example,
-        #    containing all references for that example (here we only have one).
+        # Add them to the big lists
         references.append([reference_tokens])
         candidates.append(candidate_tokens)
 
@@ -155,25 +182,27 @@ def evaluate_perplexity(model, test_loader, vocab_size, device, pad_token_id=3):
     :return: perplexity (float)
     """
     model.eval()
-    criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
-    
+    criterion = nn.CrossEntropyLoss(reduction="sum", ignore_index=pad_token_id)
+
     total_loss = 0.0
-    count_batches = 0
-    
+    total_tokens = 0
+
     with torch.no_grad():
         for input_ids, target_ids in test_loader:
             input_ids = input_ids.to(device)
             target_ids = target_ids.to(device)
 
-            logits, _ = model(input_ids)  # (batch_size, seq_len, vocab_size)
+            logits, _ = model(input_ids)
             loss = criterion(logits.view(-1, vocab_size), target_ids.view(-1))
-            
-            total_loss += loss.item()
-            count_batches += 1
 
-    average_loss = total_loss / count_batches
-    ppl = math.exp(average_loss)
-    return ppl
+            # Count non-padding tokens
+            num_tokens = (target_ids != pad_token_id).sum().item()
+            total_loss += loss.item()
+            total_tokens += num_tokens
+
+    average_loss = total_loss / total_tokens
+    perplexity = math.exp(average_loss)
+    return perplexity
 
 # ----------  TRAINING  --------------------------
 def train_model(model, train_loader, val_loader, vocab_size, device,
@@ -259,10 +288,10 @@ def train_model(model, train_loader, val_loader, vocab_size, device,
 def main(model_type="rnn"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1) Split data
+    # Split data
     split_train_file()
 
-    # 2) Load tokenizer, create dataset
+    # Load tokenizer, create dataset
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size= tokenizer.get_piece_size()
 
@@ -276,7 +305,7 @@ def main(model_type="rnn"):
         val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn
     )
 
-    # 3) Instantiate the chosen model
+    # Instantiate the chosen model
     if model_type.lower() == "rnn":
         print(">>> Using VanillaRNNLanguageModel...")
         model = VanillaRNNLanguageModel(
@@ -296,19 +325,19 @@ def main(model_type="rnn"):
     elif model_type.lower() == "transformer":
         print(">>> Using TransformerLanguageModel...")
         model = TransformerLanguageModel(
-        vocab_size=vocab_size,
-        embed_dim=EMBED_DIM,    
-        nhead=4,               
-        num_layers=NUM_LAYERS, 
-        feedforward_dim=512,   
-        dropout=0.2,           
-        pad_token_id=3,        
-        max_seq_len=512        
-    ).to(device)
+            vocab_size=vocab_size,
+            embed_dim=EMBED_DIM,    
+            nhead=4,               
+            num_layers=NUM_LAYERS, 
+            feedforward_dim=512,   
+            dropout=0.2,           
+            pad_token_id=3,        
+            max_seq_len=512        
+        ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}. Must be 'rnn' or 'lstm'.")
 
-    # 4) Train the model
+    # Train the model
     model, train_losses, val_losses = train_model(
         model,
         train_loader,
@@ -332,13 +361,15 @@ def main(model_type="rnn"):
     # plt.show()
 
     # Save the trained model
-    torch.save(model.state_dict(), f"models/{model_type}_final_model.pt")
+    filename = f"models/{model_type}_e{EMBED_DIM}_h{HIDDEN_DIM}_l{NUM_LAYERS}.pt"
+    torch.save(model.state_dict(), filename)
+    print(f"Saved model to: {filename}")
 
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size = tokenizer.get_piece_size()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 5) Evaluate on test set
+    # Evaluate on test set
     test_dataset = TextDataset(TEST_FILE, tokenizer, MAX_SEQ_LEN)
     test_loader  = DataLoader(test_dataset, batch_size=BATCH_SIZE,
                               shuffle=False, collate_fn=collate_fn)
@@ -348,7 +379,7 @@ def main(model_type="rnn"):
     print(f"Test Perplexity: {ppl:.3f}")
 
     # --- BLEU ---
-    bleu = compute_bleu_from_jsonl(model, TEST_FILE, tokenizer, device)
+    bleu = compute_bleu_from_jsonl(model, TEST_FILE, tokenizer, device, max_gen_len=1)
     print(f"Test BLEU: {bleu:.4f}")
 
 if __name__ == "__main__":

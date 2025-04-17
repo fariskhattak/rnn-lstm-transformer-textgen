@@ -41,7 +41,7 @@ class LSTMLanguageModel(nn.Module):
         logits = self.fc(output) # compute output logits
         return logits, hidden
     
-    def predict_next_token(self, input_ids):
+    def predict_next_token(self, input_ids, top_p=0.9):
         """
         Predict the next token ID (and hidden state) from the last token in input_ids
 
@@ -51,9 +51,30 @@ class LSTMLanguageModel(nn.Module):
         self.eval()
         with torch.no_grad():
             logits, hidden = self.forward(input_ids)
-            logits = logits[:, -1:]
-            probs = F.softmax(logits, dim=-1)
-            next_token_id = torch.argmax(probs, dim=-1)
+            # logits = logits[:, -1, :]
+            # probs = F.softmax(logits, dim=-1)
+            # next_token_id = torch.argmax(probs, dim=-1)
+            last_token_logits = logits[:, -1, :]
+            probs = F.softmax(last_token_logits, dim=-1)
+            # next_token_id = torch.argmax(probs, dim=-1)
+
+            # Apply top-p (nucleus) filtering
+            sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+            # Create a mask for tokens to keep
+            sorted_mask = cumulative_probs < top_p
+            sorted_mask[:, 0] = True  # always keep at least one token
+
+            # Zero out probabilities for tokens outside top-p
+            filtered_probs = sorted_probs * sorted_mask
+            filtered_probs = filtered_probs / filtered_probs.sum(dim=-1, keepdim=True)  # renormalize
+
+            sampled_index = torch.multinomial(filtered_probs, num_samples=1)  # shape: (batch_size, 1)
+
+            # Map sampled indices back to original vocab indices
+            next_token_id = sorted_indices.gather(1, sampled_index)  # shape: (batch_size, 1)
+
             return next_token_id.item(), hidden
 
     def generate(self, tokenizer, prompt, max_length=50, eos_token_id=None, device='cuda'):
