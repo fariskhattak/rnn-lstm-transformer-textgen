@@ -33,7 +33,7 @@ class TransformerLanguageModel(nn.Module):
             num_embeddings=vocab_size, embedding_dim=embed_dim, padding_idx=pad_token_id
         )
 
-        # PositionalEncoding – the new layer
+        # PositionalEncoding layer
         self.pos_encoding = PositionalEncoding(
             d_model=embed_dim, dropout=dropout, max_len=max_seq_len
         )
@@ -44,7 +44,7 @@ class TransformerLanguageModel(nn.Module):
             nhead=nhead,
             dim_feedforward=feedforward_dim,
             dropout=dropout,
-            batch_first=True,  # if using PyTorch 2.x
+            batch_first=True,
         )
         self.transformer_encoder = nn.TransformerEncoder(
             encoder_layer, num_layers=num_layers

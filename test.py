@@ -33,7 +33,7 @@ def test_model(model_class, model_path, model_name, tokenizer, test_loader, voca
     """
     print(f"\nEvaluating {model_name}...")
     
-    # 1) Instantiate and load
+    # Instantiate and load
     if model_name.lower() == "transformer":
         model = model_class(
             vocab_size=vocab_size,
@@ -57,11 +57,11 @@ def test_model(model_class, model_path, model_name, tokenizer, test_loader, voca
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
-    # 2) Evaluate Perplexity
+    # Evaluate Perplexity
     ppl = evaluate_perplexity(model, test_loader, vocab_size, device)
     print(f"[{model_name}] Test Perplexity: {ppl:.3f}")
 
-    # 3) Evaluate BLEU
+    # Evaluate BLEU
     bleu = compute_token_bleu(model, TEST_FILE, tokenizer, device)
     print(f"[{model_name}] Test BLEU: {bleu:.4f}")
     
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     }
 
     # Evaluate all three:
-    #  1) Vanilla RNN
+    # Vanilla RNN
     test_model(
         model_class=VanillaRNNLanguageModel,
         model_path=model_paths["rnn"],
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         device=device
     )
 
-    #  2) LSTM
+    # LSTM
     test_model(
         model_class=LSTMLanguageModel,
         model_path=model_paths["lstm"],
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         device=device
     )
 
-    #  3) Transformer
+    # Transformer
     test_model(
         model_class=TransformerLanguageModel,
         model_path=model_paths["transformer"],

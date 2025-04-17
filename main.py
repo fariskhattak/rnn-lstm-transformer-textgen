@@ -29,7 +29,7 @@ MAX_SEQ_LEN  = 256
 BATCH_SIZE   = 128
 EMBED_DIM    = 256
 HIDDEN_DIM   = 512
-NUM_LAYERS   = 4
+NUM_LAYERS   = 3
 EPOCHS       = 30
 LEARNING_RATE= 1e-3
 
@@ -108,7 +108,6 @@ def compute_token_bleu(model, jsonl_file, tokenizer, device):
         generated_token = tokenizer.decode([token_id]).strip()
         reference_token = reference_text.strip()
 
-        # Optionally tokenize with nltk
         candidates.append(nltk.word_tokenize(generated_token))
         references.append([nltk.word_tokenize(reference_token)])
 
@@ -160,7 +159,7 @@ def compute_bleu_from_jsonl(model, jsonl_file, tokenizer, device, max_gen_len=50
         references.append([reference_tokens])
         candidates.append(candidate_tokens)
 
-    # 5) Compute corpus-level BLEU with smoothing
+    # Compute corpus-level BLEU with smoothing
     bleu_score = corpus_bleu(
         references,
         candidates,
@@ -293,17 +292,13 @@ def main(model_type="rnn"):
 
     # Load tokenizer, create dataset
     tokenizer = load_tokenizer(TOKENIZER_PATH)
-    vocab_size= tokenizer.get_piece_size()
+    vocab_size = tokenizer.get_piece_size()
 
     train_dataset = TextDataset(TRAIN_SPLIT_FILE, tokenizer, MAX_SEQ_LEN)
-    val_dataset   = TextDataset(VAL_SPLIT_FILE,   tokenizer, MAX_SEQ_LEN)
+    val_dataset = TextDataset(VAL_SPLIT_FILE, tokenizer, MAX_SEQ_LEN)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn
-    )
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
     # Instantiate the chosen model
     if model_type.lower() == "rnn":
@@ -335,7 +330,7 @@ def main(model_type="rnn"):
             max_seq_len=512        
         ).to(device)
     else:
-        raise ValueError(f"Unknown model_type: {model_type}. Must be 'rnn' or 'lstm'.")
+        raise ValueError(f"Unknown model_type: {model_type}. Must be 'rnn' or 'lstm' or 'transformer.")
 
     # Train the model
     model, train_losses, val_losses = train_model(
@@ -348,6 +343,15 @@ def main(model_type="rnn"):
         lr=LEARNING_RATE,
         early_stopping_patience=3
     )
+
+    # Save loss curves
+    loss_data = {
+        "train_losses": train_losses,
+        "val_losses": val_losses
+    }
+
+    with open(f"loss_data/{model_type}_loss.json", "w") as f:
+        json.dump(loss_data, f)
 
     # # Plot the train/val loss curves
     # epochs_range = range(1, len(train_losses) + 1)

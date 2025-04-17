@@ -8,12 +8,8 @@ from transformer import TransformerLanguageModel
 
 # ---------- SETTINGS ----------
 TOKENIZER_PATH = "bpe_tokenizer.model"
-MODEL_DIR = "models"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-EMBED_DIM = 128
-HIDDEN_DIM = 256
-NUM_LAYERS = 2
 PAD_TOKEN_ID = 3  # consistent with training
 
 # ---------- LOAD TOKENIZER ----------
@@ -23,17 +19,21 @@ def load_tokenizer(path):
     return sp
 
 # ---------- LOAD MODEL ----------
-def load_model(model_type, vocab_size):
+def load_model(model_type, model_path, vocab_size, embed_dim, hidden_dim, num_layers):
     if model_type == "rnn":
-        model = VanillaRNNLanguageModel(vocab_size, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS, pad_token_id=PAD_TOKEN_ID)
+        model = VanillaRNNLanguageModel(
+            vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim,
+            num_layers=num_layers, pad_token_id=PAD_TOKEN_ID)
     elif model_type == "lstm":
-        model = LSTMLanguageModel(vocab_size, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS, pad_token_id=PAD_TOKEN_ID)
+        model = LSTMLanguageModel(
+            vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim,
+            num_layers=num_layers, pad_token_id=PAD_TOKEN_ID)
     elif model_type == "transformer":
-        model = TransformerLanguageModel(vocab_size=vocab_size, embed_dim=EMBED_DIM, nhead=4, num_layers=NUM_LAYERS, feedforward_dim=512, dropout=0.2, pad_token_id=PAD_TOKEN_ID)
+                model = TransformerLanguageModel(vocab_size=vocab_size, embed_dim=embed_dim, nhead=4, num_layers=num_layers, feedforward_dim=512, dropout=0.2, pad_token_id=PAD_TOKEN_ID)
+
     else:
         raise ValueError("Invalid model type. Choose from 'rnn', 'lstm', 'transformer'")
 
-    model_path = f"{MODEL_DIR}/{model_type}_final_model.pt"
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()
@@ -53,12 +53,26 @@ def chat(model, tokenizer):
 # ---------- MAIN ----------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default="rnn", choices=["rnn", "lstm", "transformer"], help="Choose model type to chat with")
+    parser.add_argument("--model_type", type=str, default="rnn", choices=["rnn", "lstm", "transformer"],
+                        help="Choose model type to chat with")
+    parser.add_argument("--model_path", type=str, required=True,
+                        help="Path to the saved model (.pt) file")
+    parser.add_argument("--embed_dim", type=int, default=128,
+                        help="Embedding dimension size")
+    parser.add_argument("--hidden_dim", type=int, default=256,
+                        help="Hidden layer size (ignored for Transformer FFN)")
+    parser.add_argument("--num_layers", type=int, default=2,
+                        help="Number of RNN/LSTM/Transformer layers")
     args = parser.parse_args()
 
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size = tokenizer.get_piece_size()
-    model = load_model(args.model_type, vocab_size)
+    model = load_model(
+        args.model_type, args.model_path, vocab_size,
+        embed_dim=args.embed_dim,
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers
+    )
 
     chat(model, tokenizer)
 
